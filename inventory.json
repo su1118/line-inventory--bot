@@ -1,1 +1,26 @@
-{}
+{
+  "CL20733": {
+    "name": "棒球外套",
+    "category": "衣物",
+    "size": "L",
+    "code": "CL20733",
+    "center": 5,
+    "warehouse": 10
+  },
+  "BA34689": {
+    "name": "機能包",
+    "category": "背包",
+    "size": "無",
+    "code": "BA34689",
+    "center": 0,
+    "warehouse": 25
+  },
+  "CU13259": {
+    "name": "馬克杯",
+    "category": "杯具",
+    "size": "無",
+    "code": "CU13259",
+    "center": 3,
+    "warehouse": 8
+  }
+}
