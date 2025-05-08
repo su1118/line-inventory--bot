@@ -175,6 +175,11 @@ def handle_message(event):
         user_states[user_id] = {"action": "transfer", "step": 1, "data": {}}
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="請輸入商品代碼："))
         return
+    if text == "查詢":
+        user_states[user_id] = {"action": "search", "step": 1, "data": {}}
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="請輸入商品名稱或代碼："))
+        return
+
     if text == "刪除":
         user_states[user_id] = {"action": "delete", "step": 1, "data": {}}
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="請輸入商品代碼："))
@@ -182,6 +187,47 @@ def handle_message(event):
 
     reply = handle_command(text, user_id)
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+
+def handle_command(text, user):
+    args = text.split()
+    try:
+        if args[0] == "查詢":
+            return search_text(" ".join(args[1:]))
+        elif args[0] == "總覽":
+            return overview_text()
+        elif args[0] == "補貨":
+            return restock_text(args[1], int(args[2]), user)
+        elif args[0] == "販售":
+            return sell_text(args[1], int(args[2]), user)
+        elif args[0] == "調貨":
+            return transfer_text(args[1], int(args[2]), user)
+        elif args[0] == "新增":
+            return add_text(args[1], args[2], args[3], int(args[4]), user)
+        elif args[0] == "刪除":
+            return delete_text(args[1], int(args[2]), args[3], user)
+        elif args[0] == "紀錄":
+            return get_logs(int(args[1]) if len(args) > 1 else 5)
+        else:
+            return "無效指令，請使用『功能』選單或輸入完整指令"
+    except Exception as e:
+        return f"錯誤：{e}"
+
+def search_text(keyword):
+    data = load_inventory()
+    result = ""
+    for item in data.values():
+        if keyword.lower() in item["code"].lower() or keyword.lower() in item["name"].lower():
+            result += f"
+{item['code']} - {item['name']} ({item['size']})
+中心: {item['center']} 倉庫: {item['warehouse']}"
+    return result.strip() if result else "找不到符合的商品"
+
+def get_logs(n=5):
+    if not os.path.exists(LOG_FILE):
+        return "尚無操作紀錄"
+    with open(LOG_FILE, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+        return "".join(lines[-n:]) if lines else "尚無操作紀錄"
 
 def handle_command(text, user):
     args = text.split()
