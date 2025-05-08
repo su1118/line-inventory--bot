@@ -217,10 +217,9 @@ def search_text(keyword):
     result = ""
     for item in data.values():
         if keyword.lower() in item["code"].lower() or keyword.lower() in item["name"].lower():
-            result += f"
-{item['code']} - {item['name']} ({item['size']})
-中心: {item['center']} 倉庫: {item['warehouse']}"
+            result += f"{item['code']} - {item['name']} ({item['size']})\n中心: {item['center']} 倉庫: {item['warehouse']}\n"
     return result.strip() if result else "找不到符合的商品"
+
 
 def get_logs(n=5):
     if not os.path.exists(LOG_FILE):
