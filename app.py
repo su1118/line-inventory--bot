@@ -1,26 +1,27 @@
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage, TextSendMessage
+from linebot.models import (
+    MessageEvent, TextMessage, TextSendMessage,
+    QuickReply, QuickReplyButton, MessageAction
+)
 
 import json, os, random, datetime
 
 # ===== LINE Bot 設定 =====
-LINE_CHANNEL_ACCESS_TOKEN = "wtWKP5aIRl79VjNO0LueW3V+c0C4IhTUGvDlwRe2TKwBwSGwrWfP35mgSKOU7Ie2dn3G9l3b85HZxovXfliCLAQwJa9B/1omWrs8hyJOftuBydYTTEt7bZP8RPmirYWC09/3rT/AH7vfXldcOJVjHgdB04t89/1O/w1cDnyilFU="
-LINE_CHANNEL_SECRET = "91f81ff0defaa59d9f349fcbda672021"
+LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
+LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET")
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
-# ===== Flask App =====
 app = Flask(__name__)
 
-# ===== 常數設定 =====
 CATEGORY_CODES = {"衣物": "CL", "背包": "BA", "杯具": "CU", "帽子": "CA", "配件": "TH", "徽章磁鐵": "MA"}
 SIZE_CODES = {"S": "1", "M": "2", "L": "3", "XL": "4", "2XL": "5", "3XL": "6", "4XL": "7", "5XL": "8"}
 DATA_FILE = "inventory.json"
 LOG_FILE = "log.txt"
+user_states = {}
 
-# ===== 資料存取 =====
 def load_inventory():
     return json.load(open(DATA_FILE, "r", encoding="utf-8")) if os.path.exists(DATA_FILE) else {}
 
@@ -32,13 +33,27 @@ def log_action(user, action):
     with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(f"[{now}] {user}: {action}\n")
 
-# ===== 功能實作 =====
+def get_function_quick_reply():
+    return TextSendMessage(
+        text="請選擇功能：",
+        quick_reply=QuickReply(items=[
+            QuickReplyButton(action=MessageAction(label="新增", text="新增")),
+            QuickReplyButton(action=MessageAction(label="查詢", text="查詢")),
+            QuickReplyButton(action=MessageAction(label="補貨", text="補貨")),
+            QuickReplyButton(action=MessageAction(label="販售", text="販售")),
+            QuickReplyButton(action=MessageAction(label="調貨", text="調貨")),
+            QuickReplyButton(action=MessageAction(label="刪除", text="刪除")),
+            QuickReplyButton(action=MessageAction(label="總覽", text="總覽")),
+            QuickReplyButton(action=MessageAction(label="紀錄", text="紀錄"))
+        ])
+    )
+
 def search_text(keyword):
     data = load_inventory()
     result = ""
     for item in data.values():
         if keyword.lower() in item["code"].lower() or keyword.lower() in item["name"].lower():
-            result += f"\n{item['code']} - {item['name']} ({item['size']})\n中心: {item['center']} 倉庫: {item['warehouse']}"
+            result += f"{item['code']} - {item['name']} ({item['size']})\n中心: {item['center']} 倉庫: {item['warehouse']}\n"
     return result.strip() if result else "找不到符合的商品"
 
 def overview_text():
@@ -50,8 +65,14 @@ def overview_text():
             center_list.append(f"{item['code']} - {item['name']}({item['size']}): {item['center']}")
         if item["warehouse"] > 0:
             warehouse_list.append(f"{item['code']} - {item['name']}({item['size']}): {item['warehouse']}")
-    result = "【中心庫存】\n" + "\n".join(center_list) + "\n【倉庫庫存】\n" + "\n".join(warehouse_list)
-    return result.strip()
+    return "【中心庫存】\n" + "\n".join(center_list) + "\n【倉庫庫存】\n" + "\n".join(warehouse_list)
+
+def get_logs(n=5):
+    if not os.path.exists(LOG_FILE):
+        return "尚無操作紀錄"
+    with open(LOG_FILE, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+        return "".join(lines[-n:]) if lines else "尚無操作紀錄"
 
 def restock_text(code, qty, user):
     data = load_inventory()
@@ -121,26 +142,6 @@ def delete_text(code, qty, location, user):
     log_action(user, f"刪除 {location} {code} 數量：{qty}")
     return f"刪除成功，目前{location}庫存：{data[code][location.lower()]}"
 
-# ===== LINE Webhook 接收點 =====
-@app.route("/callback", methods=['POST'])
-def callback():
-    signature = request.headers['X-Line-Signature']
-    body = request.get_data(as_text=True)
-    try:
-        handler.handle(body, signature)
-    except InvalidSignatureError:
-        abort(400)
-    return 'OK'
-
-# ===== 處理 LINE 訊息事件 =====
-@handler.add(MessageEvent, message=TextMessage)
-def handle_message(event):
-    user_input = event.message.text.strip()
-    user_id = event.source.user_id
-    reply = handle_command(user_input, user_id)
-    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
-
-# ===== 指令處理器 =====
 def handle_command(text, user):
     args = text.split()
     try:
@@ -158,13 +159,118 @@ def handle_command(text, user):
             return add_text(args[1], args[2], args[3], int(args[4]), user)
         elif args[0] == "刪除":
             return delete_text(args[1], int(args[2]), args[3], user)
+        elif args[0] == "紀錄":
+            return get_logs(int(args[1]) if len(args) > 1 else 5)
         else:
-            return "可用指令：\n查詢 <名稱/代碼>\n總覽\n補貨 <代碼> <數量>\n販售 <代碼> <數量>\n調貨 <代碼> <數量>\n新增 <名稱> <分類> <尺寸> <數量>\n刪除 <代碼> <數量> <中心/倉庫>"
+            return "無效指令，請使用『功能』選單或輸入完整指令"
     except Exception as e:
         return f"錯誤：{e}"
 
-# ===== 啟動伺服器 =====
+def handle_step_input(user_id, text):
+    state = user_states[user_id]
+    data = state["data"]
+    if state["action"] == "add":
+        if state["step"] == 1:
+            data["name"] = text
+            state["step"] = 2
+            return "請輸入分類（衣物／背包／杯具／帽子／配件／徽章磁鐵）："
+        elif state["step"] == 2:
+            data["category"] = text
+            state["step"] = 3
+            return "請輸入尺寸（S ~ 5XL，若無尺寸請輸入 無）："
+        elif state["step"] == 3:
+            data["size"] = text
+            state["step"] = 4
+            return "請輸入數量："
+        elif state["step"] == 4:
+            try:
+                qty = int(text)
+                user_states.pop(user_id)
+                return add_text(data["name"], data["category"], data["size"], qty, user_id)
+            except ValueError:
+                return "請輸入正確的數字作為數量"
+    elif state["action"] in ["restock", "sell", "transfer"]:
+        if state["step"] == 1:
+            data["code"] = text
+            state["step"] = 2
+            return "請輸入數量："
+        elif state["step"] == 2:
+            try:
+                qty = int(text)
+                user_states.pop(user_id)
+                if state["action"] == "restock":
+                    return restock_text(data["code"], qty, user_id)
+                elif state["action"] == "sell":
+                    return sell_text(data["code"], qty, user_id)
+                elif state["action"] == "transfer":
+                    return transfer_text(data["code"], qty, user_id)
+            except ValueError:
+                return "請輸入正確的數字作為數量"
+    elif state["action"] == "delete":
+        if state["step"] == 1:
+            data["code"] = text
+            state["step"] = 2
+            return "請輸入數量："
+        elif state["step"] == 2:
+            try:
+                data["qty"] = int(text)
+                state["step"] = 3
+                return "請輸入地點（中心 或 倉庫）："
+            except ValueError:
+                return "請輸入正確的數字作為數量"
+        elif state["step"] == 3:
+            location = text.strip()
+            if location not in ["中心", "倉庫"]:
+                return "請輸入「中心」或「倉庫」"
+            user_states.pop(user_id)
+            return delete_text(data["code"], data["qty"], location, user_id)
+    elif state["action"] == "search":
+        user_states.pop(user_id)
+        return search_text(text)
+
+@app.route("/callback", methods=['POST'])
+def callback():
+    signature = request.headers['X-Line-Signature']
+    body = request.get_data(as_text=True)
+    try:
+        handler.handle(body, signature)
+    except InvalidSignatureError:
+        abort(400)
+    return 'OK'
+
+@handler.add(MessageEvent, message=TextMessage)
+def handle_message(event):
+    user_id = event.source.user_id
+    text = event.message.text.strip()
+
+    if user_id in user_states:
+        reply = handle_step_input(user_id, text)
+        line_bot_api.reply_message(event.reply_token, [
+            TextSendMessage(text=reply),
+            get_function_quick_reply()
+        ])
+        return
+
+    if text.lower() in ["功能", "menu", "選單"]:
+        line_bot_api.reply_message(event.reply_token, get_function_quick_reply())
+        return
+
+    actions = {
+        "新增": "add", "補貨": "restock", "販售": "sell",
+        "調貨": "transfer", "刪除": "delete", "查詢": "search"
+    }
+    if text in actions:
+        user_states[user_id] = {"action": actions[text], "step": 1, "data": {}}
+        prompt = "請輸入商品名稱：" if text == "新增" else "請輸入商品代碼：" if text != "查詢" else "請輸入商品名稱或代碼："
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=prompt))
+        return
+
+    reply = handle_command(text, user_id)
+    line_bot_api.reply_message(event.reply_token, [
+        TextSendMessage(text=reply),
+        get_function_quick_reply()
+    ])
+
 if __name__ == "__main__":
-    import os
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
